@@ -3,39 +3,6 @@
 A one-thumb neon lane racer, built to YouTube Playables spec. Single HTML file,
 no build step, no dependencies, no external network requests at runtime.
 
-**Play:** https://YOUR-USERNAME.github.io/neon-drift/
-
----
-
-## Putting this online (about 5 minutes)
-
-You need a free GitHub account. Everything below happens in the browser.
-
-1. Go to **github.com/new**.
-   - Repository name: `neon-drift`
-   - Visibility: **Public** (GitHub Pages needs public on the free plan)
-   - Tick **Add a README file** — you'll replace it in a moment
-   - Click **Create repository**
-
-2. On the new repo page, click **Add file → Upload files**, drag in
-   `index.html`, `.nojekyll` and this `README.md`, then **Commit changes**.
-   (If `.nojekyll` won't drag because it's a hidden file, skip it — it only
-   matters for folders starting with an underscore, and there aren't any.)
-
-3. Click **Settings → Pages** (left sidebar).
-   - Source: **Deploy from a branch**
-   - Branch: **main**, folder: **/ (root)**
-   - **Save**
-
-4. Wait 1–2 minutes, then open
-   `https://YOUR-USERNAME.github.io/neon-drift/`.
-   That URL is what goes in the YouTube Playables interest form.
-
-To update the game later, upload a new `index.html` over the old one — the URL
-stays the same.
-
----
-
 ## Controls
 
 | Action | Touch | Keyboard |
