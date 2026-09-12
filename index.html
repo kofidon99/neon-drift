@@ -93,7 +93,52 @@ img{max-width:100%}[hidden]{display:none!important}</style>
     margin:0; font-size:12px; font-weight:800; letter-spacing:.3em; text-transform:uppercase; color:#ffd66e;
     filter:drop-shadow(0 0 14px rgba(255,190,70,.6));
   }
-  .runstats{ margin:0; font-size:12px; letter-spacing:.16em; color:#7d9ec0; text-transform:uppercase; font-weight:700; }
+  .runstats{
+    margin:0; font-size:12px; letter-spacing:.14em; color:#7d9ec0; text-transform:uppercase;
+    font-weight:700; line-height:1.9; max-width:30ch; text-wrap:balance;
+  }
+
+  :focus-visible{ outline:2px solid #8ff8ff; outline-offset:3px; }
+
+  /* ---- difficulty picker ---- */
+  /* One row at every width — three pills that share the space rather than
+     wrapping two-and-one, which reads as a layout accident. */
+  .tiers{
+    display:flex; gap:8px; justify-content:center; margin:4px 0 0;
+    width:100%; max-width:430px;
+  }
+  .tier{
+    appearance:none; -webkit-appearance:none; cursor:pointer; font-family:inherit;
+    border:1px solid rgba(130,200,255,.22); background:rgba(12,10,32,.55); color:#8fb8d6;
+    padding:11px 9px; border-radius:14px; flex:1 1 0; min-width:0;
+    display:flex; flex-direction:column; gap:4px; align-items:center; justify-content:center;
+    transition:border-color .14s ease, background .14s ease, transform .12s ease, color .14s ease;
+  }
+  .tier:hover{ border-color:rgba(140,220,255,.55); }
+  .tier:active{ transform:scale(.97); }
+  .tier .tn{ font-size:12px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
+  .tier .tb{ font-size:10px; letter-spacing:.02em; line-height:1.3; color:#6d8fae; }
+  .tier[aria-checked="true"]{
+    border-color:rgba(143,248,255,.85); background:rgba(28,58,92,.62); color:#eafcff;
+    box-shadow:0 0 24px rgba(45,200,255,.26);
+  }
+  .tier[aria-checked="true"] .tb{ color:#9fd7f5; }
+
+  .tierline{
+    margin:0; font-size:11px; letter-spacing:.26em; text-transform:uppercase;
+    color:#7fa8c8; font-weight:800;
+  }
+  .suggest{
+    display:flex; flex-direction:column; gap:9px; align-items:center; margin:0;
+    padding:13px 18px; border-radius:15px;
+    background:rgba(22,16,46,.72); border:1px solid rgba(255,214,110,.34);
+  }
+  .suggest .msg{
+    margin:0; font-size:12px; letter-spacing:.09em; color:#ffd66e; font-weight:700; max-width:30ch;
+  }
+  .suggest .btn.ghost{
+    margin:0; color:#ffe4a8; box-shadow:0 0 0 1px rgba(255,214,110,.45) inset;
+  }
 </style>
 </head>
 <body>
@@ -108,6 +153,7 @@ img{max-width:100%}[hidden]{display:none!important}</style>
   <div class="overlay" id="ovMenu">
     <h1 class="logo">Neon<br>Drift</h1>
     <p class="tagline">Outrun the grid</p>
+    <div class="tiers" id="tierPick" role="radiogroup" aria-label="Difficulty"></div>
     <button class="btn" id="btnPlay" type="button">Drive</button>
     <p class="hint" id="menuHint"></p>
   </div>
@@ -117,9 +163,13 @@ img{max-width:100%}[hidden]{display:none!important}</style>
     <p class="record" id="newRecord" hidden>New Record</p>
     <div class="scorecard">
       <div class="stat"><div class="k">Score</div><div class="v" id="finalScore">0</div></div>
-      <div class="stat best"><div class="k">Best</div><div class="v" id="bestScore">0</div></div>
+      <div class="stat best"><div class="k" id="bestLabel">Best</div><div class="v" id="bestScore">0</div></div>
     </div>
     <p class="runstats" id="runStats"></p>
+    <div class="suggest" id="suggestBox" hidden>
+      <p class="msg" id="suggestMsg"></p>
+      <button class="btn ghost" id="btnSuggest" type="button"></button>
+    </div>
     <button class="btn" id="btnAgain" type="button">Race Again</button>
     <button class="btn ghost" id="btnMenu" type="button">Menu</button>
   </div>
@@ -185,15 +235,37 @@ img{max-width:100%}[hidden]{display:none!important}</style>
   var SAVE_KEY = 'neondrift.v1';
 
   var Store = {
-    data: { best: 0, runs: 0, muted: false, seenTips: false },
+    data: {
+      bests: { cruise: 0, drive: 0, redline: 0 },
+      tier: 'drive',
+      runs: 0,
+      muted: false,
+      seenTips: false,
+      quickDeaths: 0,      // consecutive short runs — drives the tier suggestion
+      offeredDown: false,
+      offeredUp: false
+    },
+
+    best: function (id) { return Store.data.bests[id || Store.data.tier] || 0; },
 
     load: function (done) {
       var finish = function (obj) {
         if (obj && typeof obj === 'object') {
-          if (typeof obj.best === 'number') Store.data.best = obj.best;
+          // v1 stored a single numeric best with no notion of difficulty.
+          // That score was set on what is now "Drive", so migrate it there.
+          if (typeof obj.best === 'number') Store.data.bests.drive = obj.best;
+          if (obj.bests && typeof obj.bests === 'object') {
+            ['cruise', 'drive', 'redline'].forEach(function (k) {
+              if (typeof obj.bests[k] === 'number') Store.data.bests[k] = obj.bests[k];
+            });
+          }
+          if (typeof obj.tier === 'string' && tierById(obj.tier).id === obj.tier) Store.data.tier = obj.tier;
           if (typeof obj.runs === 'number') Store.data.runs = obj.runs;
           if (typeof obj.muted === 'boolean') Store.data.muted = obj.muted;
           if (typeof obj.seenTips === 'boolean') Store.data.seenTips = obj.seenTips;
+          if (typeof obj.quickDeaths === 'number') Store.data.quickDeaths = obj.quickDeaths;
+          if (typeof obj.offeredDown === 'boolean') Store.data.offeredDown = obj.offeredDown;
+          if (typeof obj.offeredUp === 'boolean') Store.data.offeredUp = obj.offeredUp;
         }
         done();
       };
@@ -324,9 +396,31 @@ img{max-width:100%}[hidden]{display:none!important}</style>
       if (o) { try { o.frequency.exponentialRampToValueAtTime(base * 1.9, this.ctx.currentTime + 0.13); } catch (e) {} }
     },
 
-    shieldUp: function () {
-      this.blip(420, 0.3, 'sine', 0.28);
-      this.blip(630, 0.34, 'sine', 0.18);
+    lifeUp: function () {
+      this.blip(392, 0.26, 'sine', 0.26);
+      this.blip(523, 0.30, 'sine', 0.22);
+      this.blip(659, 0.34, 'triangle', 0.16);
+    },
+
+    // Losing a life: a downward two-tone thud, clearly not a game-over crash.
+    hurt: function () {
+      if (!this.started) return;
+      var ctx = this.ctx, t = ctx.currentTime;
+      var s = ctx.createBufferSource(); s.buffer = this.noiseBuf;
+      var f = ctx.createBiquadFilter(); f.type = 'lowpass';
+      f.frequency.setValueAtTime(1600, t);
+      f.frequency.exponentialRampToValueAtTime(240, t + 0.34);
+      var g = ctx.createGain();
+      g.gain.setValueAtTime(0.34, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.38);
+      s.connect(f); f.connect(g); g.connect(this.master); s.start(t); s.stop(t + 0.4);
+      var o = ctx.createOscillator(), og = ctx.createGain();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(233, t);
+      o.frequency.exponentialRampToValueAtTime(110, t + 0.3);
+      og.gain.setValueAtTime(0.28, t);
+      og.gain.exponentialRampToValueAtTime(0.0001, t + 0.34);
+      o.connect(og); og.connect(this.master); o.start(t); o.stop(t + 0.36);
     },
 
     nearMiss: function () {
@@ -442,6 +536,56 @@ img{max-width:100%}[hidden]{display:none!important}</style>
   var BOOST_TIME = 3.2;
   var BOOST_SPEED_MUL = 1.55;
   var ORB_ENERGY = 12;
+  var INVULN_TIME = 1.9;
+
+  /* ---- difficulty ------------------------------------------------------
+     Tuned around REACTION TIME, not around making the car worse to drive.
+     A car spawns ~861 logical units above you and closes at
+     speed * (1 - frac), so the window you get to read it and move is
+     861 / (speed * (1 - frac)) seconds. Each tier below is built backwards
+     from the window it should give at its top speed:
+
+        Cruise   ~1.4 - 2.4s      learning, or lower reaction speed
+        Drive    ~0.9 - 1.5s      the v1 balance
+        Redline  ~0.7 - 1.1s      fast hands only
+
+     Steering feel (LANE_SHIFT_TIME) is deliberately identical in all three —
+     difficulty comes from the world, never from sluggish controls. */
+  var TIERS = [
+    {
+      id: 'cruise', name: 'Cruise', blurb: 'Room to think',
+      base: 480, gain: 460, tau: 70, creep: 0.6, creepMax: 120,
+      frac: [0.42, 0.66], gapMul: 1.34, waveAt: [20, 55, 110],
+      driftAt: 55, barrierAt: 95, driftOdds: 0.16,
+      lives: 4, maxLives: 6, lifeEvery: [26, 38],
+      forgive: 0.58, scoreMul: 0.7
+    },
+    {
+      id: 'drive', name: 'Drive', blurb: 'The real thing',
+      base: 600, gain: 700, tau: 55, creep: 1.1, creepMax: 200,
+      frac: [0.34, 0.60], gapMul: 1.0, waveAt: [12, 34, 72],
+      driftAt: 35, barrierAt: 60, driftOdds: 0.22,
+      lives: 3, maxLives: 5, lifeEvery: [34, 50],
+      forgive: 0.66, scoreMul: 1.0
+    },
+    {
+      id: 'redline', name: 'Redline', blurb: 'Fast hands only',
+      base: 720, gain: 860, tau: 42, creep: 1.5, creepMax: 260,
+      frac: [0.30, 0.56], gapMul: 0.82, waveAt: [6, 18, 40],
+      driftAt: 18, barrierAt: 34, driftOdds: 0.30,
+      lives: 2, maxLives: 3, lifeEvery: [40, 58],
+      forgive: 0.70, scoreMul: 1.45
+    }
+  ];
+
+  function tierById(id) {
+    for (var i = 0; i < TIERS.length; i++) if (TIERS[i].id === id) return TIERS[i];
+    return TIERS[1];
+  }
+  function tierIndex(id) {
+    for (var i = 0; i < TIERS.length; i++) if (TIERS[i].id === id) return i;
+    return 1;
+  }
 
   // Deliberately no cyan/blue in here — that hue belongs to the player car
   // alone, so you can always find yourself at a glance.
@@ -633,6 +777,7 @@ img{max-width:100%}[hidden]{display:none!important}</style>
      ========================================================================= */
   var S = {
     mode: 'menu',        // menu | play | dead | paused
+    tier: TIERS[1],
     time: 0,
     speed: 600,
     scroll: 0,
@@ -641,7 +786,11 @@ img{max-width:100%}[hidden]{display:none!important}</style>
     comboTimer: 0,
     energy: 0,
     boostT: 0,
-    shield: false,
+    lives: 3,
+    maxLives: 5,
+    invuln: 0,
+    hitsTaken: 0,
+    livesGained: 0,
     dist: 0,
     nearMisses: 0,
     orbsGot: 0,
@@ -649,17 +798,17 @@ img{max-width:100%}[hidden]{display:none!important}</style>
     slowmo: 1,
     deathT: 0,
     flash: 0,
+    hurtFlash: 0,
     boostFlash: 0,
     spawnT: 0.9,
     orbT: 3.2,
-    shieldT: 46,
+    lifeT: 46,
     lastWave: null,
     tipsShown: {},
     ents: [],
     parts: [],
     floats: [],
-    toasts: [],
-    stars: []
+    toasts: []
   };
 
   var player = { lane: 1, x: 0, targetX: 0, fromX: 0, shiftT: 1, tilt: 0, prevX: 0, alive: true };
@@ -667,11 +816,16 @@ img{max-width:100%}[hidden]{display:none!important}</style>
   var lastDt = 1 / 60;   // world delta for the frame currently being drawn
 
   function resetRun() {
-    S.time = 0; S.speed = 600; S.score = 0; S.combo = 1; S.comboTimer = 0;
-    S.energy = 0; S.boostT = 0; S.shield = false; S.dist = 0;
+    var T = tierById(Store.data.tier);
+    S.tier = T;
+    S.time = 0; S.speed = T.base; S.score = 0; S.combo = 1; S.comboTimer = 0;
+    S.energy = 0; S.boostT = 0; S.dist = 0;
+    S.lives = T.lives; S.maxLives = T.maxLives; S.invuln = 0;
+    S.hitsTaken = 0; S.livesGained = 0;
     S.nearMisses = 0; S.orbsGot = 0; S.shake = 0; S.slowmo = 1; S.deathT = 0;
-    S.flash = 0; S.boostFlash = 0;
-    S.spawnT = 1.0; S.orbT = 4.0; S.shieldT = 46; S.lastWave = null;
+    S.flash = 0; S.hurtFlash = 0; S.boostFlash = 0;
+    S.spawnT = 1.0; S.orbT = 4.0; S.lastWave = null;
+    S.lifeT = rnd(T.lifeEvery[0], T.lifeEvery[1]);
     S.tipsShown = {};
     S.ents.length = 0; S.parts.length = 0; S.floats.length = 0; S.toasts.length = 0;
     player.lane = 1;
@@ -790,7 +944,8 @@ img{max-width:100%}[hidden]{display:none!important}</style>
      8. SPAWNING — waves, with guaranteed gaps and staged mechanics
      ========================================================================= */
   function speedAt(t) {
-    return 600 + 700 * (1 - Math.exp(-t / 55)) + Math.min(t * 1.1, 200);
+    var T = S.tier;
+    return T.base + T.gain * (1 - Math.exp(-t / T.tau)) + Math.min(t * T.creep, T.creepMax);
   }
 
   function laneOccupiedNear(lane, y, pad) {
@@ -806,7 +961,8 @@ img{max-width:100%}[hidden]{display:none!important}</style>
 
   function spawnWave() {
     var t = S.time;
-    var maxBlock = t < 12 ? 1 : (t < 34 ? 2 : (t < 72 ? 2 : 3));
+    var T = S.tier;
+    var maxBlock = t < T.waveAt[0] ? 1 : (t < T.waveAt[2] ? 2 : 3);
     var count = rndi(1, maxBlock);
     if (count === 3 && S.lastWave === 3) count = 2;      // never two brutal waves back to back
     S.lastWave = count;
@@ -820,7 +976,7 @@ img{max-width:100%}[hidden]{display:none!important}</style>
     }
 
     var y = -170;
-    var useBarrier = t > 60 && chosen.length >= 2 && Math.random() < 0.3;
+    var useBarrier = t > T.barrierAt && chosen.length >= 2 && Math.random() < 0.3;
     if (useBarrier) {
       // find two adjacent lanes among the chosen set
       chosen.sort(function (a, b) { return a - b; });
@@ -840,7 +996,7 @@ img{max-width:100%}[hidden]{display:none!important}</style>
       var lane = chosen[k];
       var ci = Math.floor(Math.random() * TRAFFIC_COLORS.length);
       var col = TRAFFIC_COLORS[ci];
-      var drifts = t > 35 && Math.random() < 0.22;
+      var drifts = t > T.driftAt && Math.random() < T.driftOdds;
       var dir = 0;
       if (drifts) {
         dir = lane === 0 ? 1 : (lane === LANES - 1 ? -1 : (Math.random() < 0.5 ? -1 : 1));
@@ -849,7 +1005,7 @@ img{max-width:100%}[hidden]{display:none!important}</style>
       S.ents.push({
         kind: 'car', lane: lane, x: laneX(lane), y: y + rnd(-18, 18),
         w: road.carW, h: road.carW * 1.62,
-        frac: rnd(0.34, 0.60), col: col, ci: ci, passed: false, dead: false,
+        frac: rnd(T.frac[0], T.frac[1]), col: col, ci: ci, passed: false, dead: false,
         drift: dir, driftT: drifts ? rnd(0.45, 1.1) : 0, driftFrom: laneX(lane), driftProg: 0,
         wob: rnd(0, 6.28)
       });
@@ -863,11 +1019,11 @@ img{max-width:100%}[hidden]{display:none!important}</style>
     S.ents.push({ kind: 'orb', lane: lane, x: laneX(lane), y: -140, w: 40, h: 40, spin: 0, dead: false });
   }
 
-  function spawnShield() {
+  function spawnLife() {
     var lane = rndi(0, LANES - 1);
     if (laneOccupiedNear(lane, -150, 230)) return;
-    toast('shield', 'SHIELD — SURVIVES ONE HIT');
-    S.ents.push({ kind: 'shield', lane: lane, x: laneX(lane), y: -140, w: 46, h: 46, spin: 0, dead: false });
+    toast('life', 'REPAIR CELL — RESTORES A LIFE');
+    S.ents.push({ kind: 'life', lane: lane, x: laneX(lane), y: -140, w: 46, h: 46, spin: 0, dead: false });
   }
 
   /* =========================================================================
@@ -915,8 +1071,9 @@ img{max-width:100%}[hidden]{display:none!important}</style>
       if (S.comboTimer <= 0) { S.combo = 1; }
     }
 
-    // --- score
-    var mul = (S.boostT > 0 ? 2 : 1) * S.combo;
+    // --- score. The tier multiplier is what keeps the three best-scores
+    //     meaningfully separate rather than just "slower tier, lower number".
+    var mul = (S.boostT > 0 ? 2 : 1) * S.combo * S.tier.scoreMul;
     S.score += S.speed * dt * 0.1 * mul;
 
     // --- player lane tween; tilt follows actual lateral velocity so it banks
@@ -936,18 +1093,27 @@ img{max-width:100%}[hidden]{display:none!important}</style>
     S.spawnT -= dt;
     if (S.spawnT <= 0) {
       spawnWave();
-      var gap = Math.max(0.44, 1.02 - S.time * 0.0062) * rnd(0.9, 1.22);
+      // gapMul scales the floor as well as the curve, so a tier's density
+      // holds all the way into the late game instead of being clamped away.
+      var gap = Math.max(0.44, 1.02 - S.time * 0.0062) * S.tier.gapMul * rnd(0.9, 1.22);
       if (S.time < 9) gap *= 1.5;
       S.spawnT = gap;
     }
     S.orbT -= dt;
     if (S.orbT <= 0 && S.time > 5) { spawnOrb(); S.orbT = rnd(2.0, 3.6); }
-    S.shieldT -= dt;
-    if (S.shieldT <= 0 && S.time > 40) { spawnShield(); S.shieldT = rnd(38, 58); }
+    S.lifeT -= dt;
+    if (S.lifeT <= 0 && S.time > 16) {
+      // Only worth spawning if it can actually be used.
+      if (S.lives < S.maxLives || Math.random() < 0.4) spawnLife();
+      S.lifeT = rnd(S.tier.lifeEvery[0], S.tier.lifeEvery[1]);
+    }
+
+    // --- invulnerability after a hit
+    if (S.invuln > 0) S.invuln = Math.max(0, S.invuln - dt);
 
     // --- entities
     var py = view.h * PLAYER_Y;
-    var phb = { x: player.x, y: py, w: road.carW * 0.66, h: road.carW * 1.62 * 0.76 };
+    var phb = { x: player.x, y: py, w: road.carW * S.tier.forgive, h: road.carW * 1.62 * 0.76 };
 
     for (var i = S.ents.length - 1; i >= 0; i--) {
       var en = S.ents[i];
@@ -963,7 +1129,7 @@ img{max-width:100%}[hidden]{display:none!important}</style>
           if (en.driftProg >= 1) { en.lane = clamp(en.lane + en.drift, 0, LANES - 1); en.drift = 0; }
         }
       }
-      if (en.kind === 'orb' || en.kind === 'shield') en.spin += dt * 3.4;
+      if (en.kind === 'orb' || en.kind === 'life') en.spin += dt * 3.4;
 
       if (en.y > view.h + 260) { S.ents.splice(i, 1); continue; }
       if (en.dead) { S.ents.splice(i, 1); continue; }
@@ -990,11 +1156,23 @@ img{max-width:100%}[hidden]{display:none!important}</style>
           if (S.energy >= 100) toast('boostready', 'BOOST READY — TAP THE RING');
           continue;
         }
-        if (en.kind === 'shield') {
-          en.dead = true; S.shield = true;
-          burst(en.x, en.y, '#ffd66e', 18, 10, 300);
-          floatText(en.x, en.y - 24, 'SHIELD', '#ffd66e', 24);
-          Sound.shieldUp();
+        if (en.kind === 'life') {
+          en.dead = true;
+          if (S.lives < S.maxLives) {
+            S.lives++;
+            S.livesGained++;
+            burst(en.x, en.y, '#6dffb0', 22, 10, 320);
+            floatText(en.x, en.y - 26, '+1 LIFE', '#6dffb0', 26);
+            Sound.lifeUp();
+          } else {
+            // Already full — pay out instead of wasting the pickup.
+            var bonus = 300 * S.combo;
+            S.score += bonus;
+            S.energy = 100;
+            burst(en.x, en.y, '#6dffb0', 18, 10, 300);
+            floatText(en.x, en.y - 26, '+' + bonus, '#6dffb0', 24);
+            Sound.lifeUp();
+          }
           continue;
         }
         // car or barrier
@@ -1007,15 +1185,8 @@ img{max-width:100%}[hidden]{display:none!important}</style>
           Sound.smash();
           continue;
         }
-        if (S.shield) {
-          S.shield = false; en.dead = true;
-          S.flash = 1; S.shake = Math.max(S.shake, 14);
-          burst(en.x, en.y, '#ffd66e', 26, 14, 380);
-          floatText(player.x, py - 100, 'SHIELD DOWN', '#ffd66e', 24);
-          Sound.smash();
-          continue;
-        }
-        die();
+        if (S.invuln > 0) continue;   // still flashing from the last hit
+        takeHit(en, py);
         continue;
       }
 
@@ -1062,6 +1233,7 @@ img{max-width:100%}[hidden]{display:none!important}</style>
 
     S.boostFlash = Math.max(0, S.boostFlash - dt * 2.2);
     S.flash = Math.max(0, S.flash - dt * 3.2);
+    S.hurtFlash = Math.max(0, S.hurtFlash - dt * 2.6);
     S.shake = Math.max(0, S.shake - dt * 26);
 
     for (var i = S.parts.length - 1; i >= 0; i--) {
@@ -1079,6 +1251,31 @@ img{max-width:100%}[hidden]{display:none!important}</style>
       S.toasts[k].life -= dt;
       if (S.toasts[k].life <= 0) S.toasts.splice(k, 1);
     }
+  }
+
+  /* A hit costs a life rather than the run. The recovery beat is deliberate:
+     the obstacle is destroyed so you can't instantly re-collide, the car sheds
+     speed so the next wave is readable, the combo resets, and you get ~2s of
+     invulnerability to get your bearings back. */
+  function takeHit(en, py) {
+    en.dead = true;
+    S.lives--;
+    S.hitsTaken++;
+    S.combo = 1;
+    S.comboTimer = 0;
+    S.shake = Math.max(S.shake, 18);
+
+    burst(en.x, en.y, en.kind === 'car' ? en.col[0] : '#ff5ea8', 24, 14, 420);
+    burst(player.x, py, '#ffffff', 14, 10, 300);
+
+    if (S.lives <= 0) { S.lives = 0; die(); return; }
+
+    S.invuln = INVULN_TIME;
+    S.hurtFlash = 1;
+    S.speed *= 0.72;                       // stumble, then recover
+    floatText(player.x, py - 96, '-1', '#ff6b8f', 32);
+    Sound.hurt();
+    if (S.lives === 1) toast('lastlife', 'LAST LIFE — FIND A REPAIR CELL');
   }
 
   function die() {
@@ -1111,12 +1308,26 @@ img{max-width:100%}[hidden]{display:none!important}</style>
     drawBackground(W, H);
     drawRoad(W, H);
     drawEntities();
-    if (player.alive) drawPlayer();
+    // The menu sits over the road; a parked car under the copy just competes
+    // with it, so the road runs empty until a run starts.
+    if (player.alive && S.mode !== 'menu') drawPlayer();
     drawParticles();
     ctx.restore();
 
     drawHud(W, H);
 
+    // Losing a life reads red at the edges; a wreck is a white-out. Different
+    // colour and different shape, so you never confuse the two.
+    if (S.hurtFlash > 0.01) {
+      ctx.save();
+      ctx.globalAlpha = S.hurtFlash * 0.85;
+      var vg = ctx.createRadialGradient(W / 2, H * 0.6, Math.min(W, H) * 0.22, W / 2, H * 0.6, Math.max(W, H) * 0.72);
+      vg.addColorStop(0, 'rgba(255,40,90,0)');
+      vg.addColorStop(1, 'rgba(255,40,90,0.62)');
+      ctx.fillStyle = vg;
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
     if (S.flash > 0.01) {
       ctx.fillStyle = 'rgba(255,255,255,' + (S.flash * 0.5) + ')';
       ctx.fillRect(0, 0, W, H);
@@ -1381,10 +1592,46 @@ img{max-width:100%}[hidden]{display:none!important}</style>
         ctx.restore();
       } else if (e.kind === 'orb') {
         drawGem('orb', e.x, e.y, 17 + Math.sin(S.time * 5 + e.spin) * 2, 17, e.spin, '#8ff8ff', '#1b8fd0');
-      } else if (e.kind === 'shield') {
-        drawGem('shield', e.x, e.y, 20 + Math.sin(S.time * 5 + e.spin) * 2, 20, e.spin, '#ffe7a3', '#d08b12');
+      } else if (e.kind === 'life') {
+        drawRepairCell(e.x, e.y, 1 + Math.sin(S.time * 5 + e.spin) * 0.05);
       }
     }
+  }
+
+  /* Repair cell. Deliberately NOT a gem: the energy orb is a spinning cyan
+     hexagon, this is an upright mint-green cell with a cross. Different shape,
+     different hue, different motion — no chance of grabbing the wrong one. */
+  function drawRepairCell(x, y, pulse) {
+    var s = sprite('repair', 108, 108, function (c, SW, SH) {
+      c.translate(SW / 2, SH / 2);
+      var R = 22;
+      c.shadowColor = '#4dffa0';
+      c.shadowBlur = 26;
+      var g = c.createLinearGradient(0, -R, 0, R);
+      g.addColorStop(0, '#c9ffe4');
+      g.addColorStop(0.5, '#4dffa0');
+      g.addColorStop(1, '#0f9c5c');
+      c.fillStyle = g;
+      roundRect(c, -R, -R, R * 2, R * 2, 8);
+      c.fill();
+      c.shadowBlur = 0;
+
+      c.strokeStyle = 'rgba(255,255,255,0.9)';
+      c.lineWidth = 2;
+      roundRect(c, -R + 1, -R + 1, R * 2 - 2, R * 2 - 2, 7);
+      c.stroke();
+
+      // cross
+      c.fillStyle = '#07321f';
+      var t = 6.5, arm = 13;
+      roundRect(c, -t / 2, -arm, t, arm * 2, 2); c.fill();
+      roundRect(c, -arm, -t / 2, arm * 2, t, 2); c.fill();
+    });
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(pulse, pulse);
+    ctx.drawImage(s.cv, -s.w / 2, -s.h / 2, s.w, s.h);
+    ctx.restore();
   }
 
   // Cached at a base radius; the pulse is applied as a cheap scale on blit.
@@ -1422,15 +1669,16 @@ img{max-width:100%}[hidden]{display:none!important}</style>
     var py = view.h * PLAYER_Y;
     var w = road.carW, h = road.carW * 1.62;
 
-    // shield bubble
-    if (S.shield) {
+    // Post-hit invulnerability: a fading ring plus a blink on the car itself,
+    // so it is obvious both that you are safe and that it is running out.
+    if (S.invuln > 0) {
+      var k = S.invuln / INVULN_TIME;
       ctx.save();
-      var pulse = 0.6 + Math.sin(S.time * 6) * 0.2;
-      ctx.strokeStyle = 'rgba(255,214,110,' + pulse + ')';
+      ctx.strokeStyle = 'rgba(255,120,150,' + (0.25 + k * 0.55) + ')';
       ctx.lineWidth = 3;
-      ctx.shadowColor = '#ffd66e'; ctx.shadowBlur = 20;
+      ctx.shadowColor = '#ff6b8f'; ctx.shadowBlur = 18;
       ctx.beginPath();
-      ctx.ellipse(player.x, py, w * 0.92, h * 0.68, 0, 0, 6.2832);
+      ctx.ellipse(player.x, py, w * (0.88 + (1 - k) * 0.12), h * (0.64 + (1 - k) * 0.08), 0, 0, 6.2832);
       ctx.stroke();
       ctx.restore();
     }
@@ -1448,6 +1696,11 @@ img{max-width:100%}[hidden]{display:none!important}</style>
     }
 
     ctx.save();
+    // blink while invulnerable — faster as it runs out
+    if (S.invuln > 0) {
+      var rate = 14 + (1 - S.invuln / INVULN_TIME) * 16;
+      ctx.globalAlpha = 0.45 + 0.55 * ((Math.sin(S.time * rate) + 1) / 2);
+    }
     ctx.translate(player.x, py);
     ctx.rotate(player.tilt);
     ctx.translate(-player.x, -py);
@@ -1503,7 +1756,9 @@ img{max-width:100%}[hidden]{display:none!important}</style>
 
     ctx.font = '700 15px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
     ctx.fillStyle = 'rgba(180,215,240,0.8)';
-    ctx.fillText('BEST  ' + fmt(Store.data.best), W / 2, 96);
+    ctx.fillText('BEST  ' + fmt(Store.best()), W / 2, 96);
+
+    drawLives(W);
 
     // combo
     if (S.combo > 1) {
@@ -1551,6 +1806,45 @@ img{max-width:100%}[hidden]{display:none!important}</style>
 
     drawBoostRing(W, H);
     ctx.restore();
+  }
+
+  /* Lives, top-left. One chevron per life the tier allows: filled for lives you
+     still have, hollow for lost ones — so the ceiling is visible too, which is
+     what tells you a repair cell is worth chasing. */
+  function drawLives(W) {
+    var n = S.maxLives;
+    var pitch = n > 5 ? 17 : 19;
+    var x0 = 20, y0 = 40;
+
+    var full = sprite('lifeIconOn', 30, 34, function (c, w, h) {
+      c.translate(w / 2, h / 2);
+      c.shadowColor = '#4dffa0'; c.shadowBlur = 12;
+      c.fillStyle = '#8dffc4';
+      c.beginPath();
+      c.moveTo(0, -9); c.lineTo(6.5, 8); c.lineTo(0, 4.5); c.lineTo(-6.5, 8);
+      c.closePath(); c.fill();
+    });
+    var empty = sprite('lifeIconOff', 30, 34, function (c, w, h) {
+      c.translate(w / 2, h / 2);
+      c.strokeStyle = 'rgba(140,180,205,0.42)';
+      c.lineWidth = 1.6;
+      c.beginPath();
+      c.moveTo(0, -9); c.lineTo(6.5, 8); c.lineTo(0, 4.5); c.lineTo(-6.5, 8);
+      c.closePath(); c.stroke();
+    });
+
+    for (var i = 0; i < n; i++) {
+      var on = i < S.lives;
+      // the life about to be lost pulses when you are down to your last one
+      if (on && S.lives === 1) {
+        ctx.save();
+        ctx.globalAlpha = 0.55 + 0.45 * ((Math.sin(S.time * 8) + 1) / 2);
+        blit(full, x0 + i * pitch, y0);
+        ctx.restore();
+      } else {
+        blit(on ? full : empty, x0 + i * pitch, y0);
+      }
+    }
   }
 
   function drawBoostRing(W, H) {
@@ -1615,6 +1909,11 @@ img{max-width:100%}[hidden]{display:none!important}</style>
   var elRecord = document.getElementById('newRecord');
   var elRunStats = document.getElementById('runStats');
   var elMenuHint = document.getElementById('menuHint');
+  var elBestLabel = document.getElementById('bestLabel');
+  var elTierPick = document.getElementById('tierPick');
+  var elSuggest = document.getElementById('suggestBox');
+  var elSuggestMsg = document.getElementById('suggestMsg');
+  var btnSuggest = document.getElementById('btnSuggest');
   var btnSound = document.getElementById('btnSound');
   var btnPause = document.getElementById('btnPause');
 
@@ -1650,6 +1949,52 @@ img{max-width:100%}[hidden]{display:none!important}</style>
     ovPause.hidden = which !== 'pause';
   }
 
+  /* ---- difficulty picker ---- */
+  function buildTierPicker() {
+    elTierPick.innerHTML = '';
+    TIERS.forEach(function (T) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'tier';
+      b.setAttribute('role', 'radio');
+      b.id = 'tier-' + T.id;
+      b.dataset.tier = T.id;
+      b.innerHTML = '<span class="tn"></span><span class="tb"></span>';
+      b.querySelector('.tn').textContent = T.name;
+      b.querySelector('.tb').textContent = T.blurb;
+      b.addEventListener('click', function () { setTier(T.id); Sound.boot(); Sound.ui(); });
+      elTierPick.appendChild(b);
+    });
+    syncTierPicker();
+  }
+
+  function syncTierPicker() {
+    var kids = elTierPick.children;
+    for (var i = 0; i < kids.length; i++) {
+      kids[i].setAttribute('aria-checked', kids[i].dataset.tier === Store.data.tier ? 'true' : 'false');
+    }
+    syncMenuHint();
+  }
+
+  function setTier(id) {
+    if (Store.data.tier === id) return;
+    Store.data.tier = id;
+    Store.data.quickDeaths = 0;   // a fresh tier deserves a fresh read on the player
+    Store.save();
+    syncTierPicker();
+  }
+
+  function syncMenuHint() {
+    var T = tierById(Store.data.tier);
+    var best = Store.best();
+    var lives = T.lives + ' lives';
+    elMenuHint.innerHTML = best > 0
+      ? '<b>' + T.name + '</b> · ' + lives + ' · best <b>' + fmt(best) + '</b><br>' +
+        'Tap the sides to steer · charge the ring to boost'
+      : '<b>' + T.name + '</b> · ' + lives + '<br>' +
+        'Tap <b>left</b> or <b>right</b> to switch lanes.<br>Collect energy, then fire <b>BOOST</b>.';
+  }
+
   function startRun() {
     Sound.boot(); Sound.resumeCtx();
     gameOverShown = false;
@@ -1661,20 +2006,63 @@ img{max-width:100%}[hidden]{display:none!important}</style>
 
   function showGameOver() {
     gameOverShown = true;
+    var T = S.tier;
     var final = Math.floor(S.score);
-    var isRecord = final > Store.data.best;
-    if (isRecord) Store.data.best = final;
+    var isRecord = final > Store.best(T.id);
+    if (isRecord) Store.data.bests[T.id] = final;
     Store.data.runs++;
     Store.data.seenTips = true;
-    Store.save();
+
+    // Track how the player is actually coping, so the tier can meet them.
+    if (S.time < 24) Store.data.quickDeaths++;
+    else Store.data.quickDeaths = 0;
 
     elFinal.textContent = fmt(final);
-    elBest.textContent = fmt(Store.data.best);
+    elBest.textContent = fmt(Store.best(T.id));
+    elBestLabel.textContent = 'Best · ' + T.name;
     elRecord.hidden = !isRecord;
     elRunStats.textContent =
-      Math.round(S.dist / 100) + 'm  ·  ' + S.nearMisses + ' near misses  ·  ' + S.orbsGot + ' energy';
+      Math.round(S.dist / 100) + 'm · ' + S.hitsTaken + ' hits · ' +
+      S.nearMisses + ' near misses · ' + S.orbsGot + ' energy' +
+      (S.livesGained ? ' · ' + S.livesGained + ' repaired' : '');
+
+    applySuggestion(T);
+    Store.save();
     showOverlay('over');
   }
+
+  /* Meets players where they are without making them self-diagnose: a run of
+     short runs offers a gentler tier, a strong long run offers a harder one.
+     Each direction is offered once so it never nags. */
+  var suggestTarget = null;
+
+  function applySuggestion(T) {
+    var idx = tierIndex(T.id);
+    suggestTarget = null;
+
+    if (Store.data.quickDeaths >= 3 && idx > 0 && !Store.data.offeredDown) {
+      suggestTarget = TIERS[idx - 1];
+      elSuggestMsg.textContent =
+        'Those runs ended early. ' + suggestTarget.name + ' gives you noticeably longer to read the traffic.';
+      btnSuggest.textContent = 'Switch to ' + suggestTarget.name;
+      Store.data.offeredDown = true;
+    } else if (S.time > 95 && S.hitsTaken <= 1 && idx < TIERS.length - 1 && !Store.data.offeredUp) {
+      suggestTarget = TIERS[idx + 1];
+      elSuggestMsg.textContent =
+        'That was a clean run. ' + suggestTarget.name + ' comes at you faster and scores ' +
+        suggestTarget.scoreMul + '×.';
+      btnSuggest.textContent = 'Try ' + suggestTarget.name;
+      Store.data.offeredUp = true;
+    }
+
+    elSuggest.hidden = !suggestTarget;
+  }
+
+  btnSuggest.addEventListener('click', function () {
+    if (!suggestTarget) return;
+    setTier(suggestTarget.id);
+    startRun();
+  });
 
   function pauseGame(byUser) {
     if (S.mode !== 'play') return;
@@ -1697,6 +2085,7 @@ img{max-width:100%}[hidden]{display:none!important}</style>
   function toMenu() {
     S.mode = 'menu';
     resetRun();
+    syncTierPicker();
     Sound.drive(0, false);
     Sound.music(0, false);
     showOverlay('menu');
@@ -1777,10 +2166,8 @@ img{max-width:100%}[hidden]{display:none!important}</style>
     layout();
     Sound.muted = !!Store.data.muted;
     syncSoundIcon();
-    elBest.textContent = fmt(Store.data.best);
-    elMenuHint.innerHTML = Store.data.best > 0
-      ? 'Best <b>' + fmt(Store.data.best) + '</b> · ' + Store.data.runs + ' runs<br>Tap the sides to steer · charge the ring to boost'
-      : 'Tap <b>left</b> or <b>right</b> to switch lanes.<br>Collect energy, then fire <b>BOOST</b>.';
+    buildTierPicker();
+    elBest.textContent = fmt(Store.best());
     resetRun();
     showOverlay('menu');
     last = performance.now();
